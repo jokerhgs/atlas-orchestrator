@@ -29,7 +29,7 @@ variable "security_group_ids" {
 variable "root_volume_size" {
   description = "Size of the root volume in GB"
   type        = number
-  default     = 20
+  default     = 30
 }
 
 variable "iam_instance_profile" {

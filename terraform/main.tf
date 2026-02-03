@@ -21,7 +21,7 @@ module "ec2" {
   subnet_id            = module.network.private_subnet_ids[count.index % length(module.network.private_subnet_ids)]
   security_group_ids   = [module.network.private_security_group_id]
   iam_instance_profile = module.iam.instance_profile_name
-  root_volume_size     = 20
+  root_volume_size     = 30
 
   tags = {
     Name = "${var.project_name}-server-${count.index + 1}"
