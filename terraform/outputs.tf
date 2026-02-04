@@ -17,3 +17,8 @@ output "instance_ids" {
   description = "The IDs of the EC2 instances"
   value       = module.ec2[*].instance_id
 }
+
+output "ssm_bucket_name" {
+  description = "The name of the S3 bucket for SSM session logs"
+  value       = module.s3.bucket_name
+}

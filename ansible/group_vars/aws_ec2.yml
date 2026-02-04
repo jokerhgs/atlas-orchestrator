@@ -1,0 +1,8 @@
+---
+# Connection settings for all AWS EC2 instances
+ansible_connection: aws_ssm
+ansible_aws_ssm_region: us-east-1
+
+# Read the bucket name from an environment variable for security
+# usage: export SSM_LOG_BUCKET="your-bucket-name"
+ansible_aws_ssm_bucket_name: "{{ lookup('env', 'SSM_LOG_BUCKET') }}"

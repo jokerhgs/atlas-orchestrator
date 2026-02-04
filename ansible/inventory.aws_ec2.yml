@@ -1,0 +1,16 @@
+plugin: amazon.aws.aws_ec2
+
+regions:
+  - us-east-1
+
+filters:
+  instance-state-name: ["running"]
+  tag:Project: atlas
+
+# Set the hostname that Ansible will display and use for these instances
+hostnames:
+  - tag:Name
+
+# 'compose' is used to set or modify variables for each host
+compose:
+  ansible_host: instance_id

@@ -12,6 +12,11 @@ module "iam" {
   project_name = var.project_name
 }
 
+module "s3" {
+  source       = "./modules/s3"
+  project_name = var.project_name
+}
+
 module "ec2" {
   count                = 1
   source               = "./modules/ec2"
@@ -24,6 +29,7 @@ module "ec2" {
   root_volume_size     = 30
 
   tags = {
-    Name = "${var.project_name}-server-${count.index + 1}"
+    Name    = "${var.project_name}-server-${count.index + 1}"
+    Project = var.project_name
   }
 }
