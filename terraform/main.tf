@@ -18,18 +18,18 @@ module "s3" {
 }
 
 module "ec2" {
-  count                = 1
+  count                = 3
   source               = "./modules/ec2"
   aws_region           = var.aws_region
-  instance_name        = "${var.project_name}-server-${count.index + 1}"
-  instance_type        = "t4g.micro"
+  instance_name        = count.index == 0 ? "${var.project_name}-control-plane" : "${var.project_name}-worker-${count.index}"
+  instance_type        = "t4g.small"
   subnet_id            = module.network.private_subnet_ids[count.index % length(module.network.private_subnet_ids)]
   security_group_ids   = [module.network.private_security_group_id]
   iam_instance_profile = module.iam.instance_profile_name
   root_volume_size     = 30
 
   tags = {
-    Name    = "${var.project_name}-server-${count.index + 1}"
+    Role    = count.index == 0 ? "control-plane" : "worker"
     Project = var.project_name
   }
 }

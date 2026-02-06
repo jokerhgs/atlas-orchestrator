@@ -4,7 +4,7 @@ variable "instance_name" {
 }
 
 variable "ami_id" {
-  description = "The AMI ID to use for the instance. If not provided, the latest Amazon Linux 2023 AMI will be used."
+  description = "The AMI ID to use for the instance. If not provided, the latest Ubuntu 22.04 LTS arm64 AMI will be used."
   type        = string
   default     = null
 }
@@ -12,7 +12,6 @@ variable "ami_id" {
 variable "instance_type" {
   description = "The instance type to use"
   type        = string
-  default     = "t3.micro"
 }
 
 variable "subnet_id" {
