@@ -27,6 +27,30 @@ resource "aws_security_group" "private_sg" {
     cidr_blocks = [var.vpc_cidr]
   }
 
+  # Allow Kubernetes API from within the VPC
+  ingress {
+    from_port   = 6443
+    to_port     = 6443
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
+  # Allow Kubelet API from within the VPC
+  ingress {
+    from_port   = 10250
+    to_port     = 10250
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
+  # Allow Flannel VXLAN from within the VPC
+  ingress {
+    from_port   = 8472
+    to_port     = 8472
+    protocol    = "udp"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
   egress {
     from_port   = 0
     to_port     = 0
