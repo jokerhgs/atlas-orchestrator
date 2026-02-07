@@ -14,3 +14,9 @@ hostnames:
 # 'compose' is used to set or modify variables for each host
 compose:
   ansible_host: instance_id
+
+# Create groups based on the Role tag
+keyed_groups:
+  - key: tags.Role
+    prefix: role
+    separator: "_"

@@ -1,0 +1,60 @@
+---
+- name: Get join command from control plane
+  hosts: role_control_plane
+  become: yes
+  tasks:
+    - name: Generate fresh join command
+      command: kubeadm token create --print-join-command
+      register: join_command_raw
+      changed_when: false
+      no_log: true
+
+    - name: Set join command as fact
+      set_fact:
+        join_command: "{{ join_command_raw.stdout }}"
+
+- name: Join worker nodes to Kubernetes cluster
+  hosts: role_worker
+  become: yes
+  vars:
+    join_command: "{{ hostvars[groups['role_control_plane'][0]]['join_command'] }}"
+
+  tasks:
+    - name: Check if node is already joined
+      stat:
+        path: /etc/kubernetes/kubelet.conf
+      register: kubelet_conf
+
+    - name: Join the cluster
+      command: "{{ join_command }}"
+      when: not kubelet_conf.stat.exists
+      register: join_result
+      async: 300
+      poll: 5
+      no_log: true
+
+    - name: Display join result
+      debug:
+        var: join_result.stdout_lines
+      when: join_result is changed
+
+- name: Verify cluster status
+  hosts: role_control_plane
+  become: yes
+  tasks:
+    - name: Wait for all nodes to be ready
+      shell: kubectl get nodes --no-headers | grep -v Ready | wc -l
+      register: not_ready_nodes
+      until: not_ready_nodes.stdout == "0"
+      retries: 30
+      delay: 10
+      changed_when: false
+
+    - name: Get cluster nodes
+      command: kubectl get nodes -o wide
+      register: cluster_nodes
+      changed_when: false
+
+    - name: Display cluster status
+      debug:
+        var: cluster_nodes.stdout_lines

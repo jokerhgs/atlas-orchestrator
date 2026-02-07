@@ -1,0 +1,122 @@
+---
+- name: Initialize Kubernetes Control Plane
+  hosts: role_control_plane
+  become: yes
+  vars:
+    pod_network_cidr: "10.244.0.0/16"
+    k8s_user: "ubuntu"
+
+  tasks:
+    - name: Ensure containerd service is enabled and started
+      systemd:
+        name: containerd
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+    - name: Wait for containerd socket to be available
+      wait_for:
+        path: /var/run/containerd/containerd.sock
+        state: present
+        timeout: 30
+
+    - name: Verify containerd is responding
+      command: crictl info
+      register: crictl_check
+      changed_when: false
+      failed_when: false
+
+    - name: Restart containerd if not responding
+      systemd:
+        name: containerd
+        state: restarted
+        daemon_reload: yes
+      when: crictl_check.rc != 0
+
+    - name: Wait after containerd restart
+      wait_for:
+        path: /var/run/containerd/containerd.sock
+        state: present
+        timeout: 30
+      when: crictl_check.rc != 0
+
+    - name: Check if Kubernetes is already initialized
+      stat:
+        path: /etc/kubernetes/admin.conf
+      register: k8s_initialized
+
+    - name: Initialize Kubernetes cluster
+      command: kubeadm init --pod-network-cidr={{ pod_network_cidr }}
+      when: not k8s_initialized.stat.exists
+      register: kubeadm_init_output
+
+    - name: Create .kube directory for user
+      file:
+        path: "/home/{{ k8s_user }}/.kube"
+        state: directory
+        owner: "{{ k8s_user }}"
+        group: "{{ k8s_user }}"
+        mode: "0755"
+
+    - name: Copy admin.conf to user's kube config
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: "/home/{{ k8s_user }}/.kube/config"
+        remote_src: yes
+        owner: "{{ k8s_user }}"
+        group: "{{ k8s_user }}"
+        mode: "0600"
+
+    - name: Create .kube directory for root
+      file:
+        path: /root/.kube
+        state: directory
+        mode: "0755"
+
+    - name: Copy admin.conf to root's kube config
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: /root/.kube/config
+        remote_src: yes
+        mode: "0600"
+
+    - name: Install Flannel CNI
+      become: yes
+      become_user: "{{ k8s_user }}"
+      command: kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
+      environment:
+        KUBECONFIG: "/home/{{ k8s_user }}/.kube/config"
+      when: not k8s_initialized.stat.exists
+
+    - name: Wait for all control plane pods to be ready
+      become: yes
+      become_user: "{{ k8s_user }}"
+      shell: kubectl get pods -n kube-system -o json | jq -r '.items[] | select(.metadata.name | startswith("kube-")) | .status.phase' | grep -v Running
+      environment:
+        KUBECONFIG: "/home/{{ k8s_user }}/.kube/config"
+      register: pending_pods
+      until: pending_pods.stdout == ""
+      retries: 30
+      delay: 10
+      failed_when: false
+      changed_when: false
+
+    - name: Generate join command for worker nodes
+      command: kubeadm token create --print-join-command
+      register: join_command_output
+      changed_when: false
+      no_log: true
+
+    - name: Save join command as a fact
+      set_fact:
+        k8s_join_command: "{{ join_command_output.stdout }}"
+
+
+
+    - name: Save join command to file on control plane
+      copy:
+        content: "{{ k8s_join_command }}"
+        dest: "/home/{{ k8s_user }}/join-command.sh"
+        owner: "{{ k8s_user }}"
+        group: "{{ k8s_user }}"
+        mode: "0600"
