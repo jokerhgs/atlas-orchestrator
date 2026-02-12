@@ -1,0 +1,18 @@
+---
+# Atlas Cluster Master Orchestrator
+# This playbook orchestrates the full end-to-end deployment of the Atlas Kubernetes Cluster.
+
+# 1. Prepare all nodes (Control Plane, Workers, and Dedicated Monitoring)
+- import_playbook: init-nodes.yaml
+
+# 2. Initialize the Kubernetes Control Plane
+- import_playbook: init-control-nodes.yaml
+
+# 3. Join Worker & Monitoring nodes to the cluster and apply Isolation Taints
+- import_playbook: init-worker-nodes.yaml
+
+# 4. Deploy the AWS EBS CSI Driver (Storage Layer)
+# - import_playbook: init-ebs-csi.yaml
+
+# 5. Deploy the LGTM Monitoring Stack + OpenTelemetry (Observability Layer)
+- import_playbook: init-monitoring-stack.yaml

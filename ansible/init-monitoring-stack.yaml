@@ -1,0 +1,163 @@
+- name: Initialize Monitoring Stack (Vaulted Shell Version)
+  hosts: role_control_plane
+  become: yes
+  vars_files:
+    - group_vars/all/vault.yml
+  vars:
+    monitoring_namespace: monitoring
+    storage_class_name: ebs-gp3
+    grafana_admin_password: "{{ vault_grafana_admin_password }}"
+    kubeconfig_path: "/root/.kube/config"
+
+  tasks:
+    - name: Ensure Vault Variable is loaded
+      fail:
+        msg: "The variable 'vault_grafana_admin_password' is not defined. Did you forget to include the vault file or '--ask-vault-pass'?"
+      when: vault_grafana_admin_password is not defined
+
+    - name: Add Grafana Helm repository
+      shell: |
+        helm repo add grafana https://grafana.github.io/helm-charts
+        helm repo update
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+
+    - name: Create Monitoring Namespace
+      shell: "kubectl create namespace '{{ monitoring_namespace }}' --dry-run=client -o yaml | kubectl apply -f -"
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+
+    - name: Create AWS EBS StorageClass
+      shell: |
+        cat <<EOF | kubectl apply -f -
+        apiVersion: storage.k8s.io/v1
+        kind: StorageClass
+        metadata:
+          name: '{{ storage_class_name }}'
+        provisioner: ebs.csi.aws.com
+        volumeBindingMode: WaitForFirstConsumer
+        reclaimPolicy: Delete
+        parameters:
+          type: gp3
+          encrypted: "true"
+        EOF
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+
+    - name: Deploy Loki (Log Aggregation)
+      shell: |
+        helm upgrade --install loki grafana/loki \
+          --namespace '{{ monitoring_namespace }}' \
+          --set loki.auth_enabled=false \
+          --set deploymentMode=SingleBinary \
+          --set loki.storage.type='filesystem' \
+          --set loki.storage.bucketNames.chunks='chunks' \
+          --set loki.storage.bucketNames.rules='rules' \
+          --set loki.storage.bucketNames.admin='admin' \
+          --set read.replicas=0 \
+          --set write.replicas=0 \
+          --set backend.replicas=0 \
+          --set loki.schemaConfig.configs[0].from="2024-01-01" \
+          --set loki.schemaConfig.configs[0].store="tsdb" \
+          --set loki.schemaConfig.configs[0].object_store="filesystem" \
+          --set loki.schemaConfig.configs[0].schema="v13" \
+          --set loki.schemaConfig.configs[0].index.prefix="loki_index_" \
+          --set loki.schemaConfig.configs[0].index.period="24h" \
+          --set lokiCanary.enabled=false \
+          --set test.enabled=false \
+          --set loki.persistence.enabled=true \
+          --set loki.persistence.storageClass='{{ storage_class_name }}' \
+          --set loki.persistence.size=10Gi \
+          --set "loki.nodeSelector.capability=monitoring" \
+          --set "loki.tolerations[0].key=dedicated" \
+          --set "loki.tolerations[0].operator=Equal" \
+          --set "loki.tolerations[0].value=monitoring" \
+          --set "loki.tolerations[0].effect=NoSchedule"
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+
+    - name: Deploy Tempo (Distributed Tracing)
+      shell: |
+        helm upgrade --install tempo grafana/tempo \
+          --namespace '{{ monitoring_namespace }}' \
+          --set tempo.storage.trace.backend=local \
+          --set tempo.persistence.enabled=true \
+          --set tempo.persistence.storageClass='{{ storage_class_name }}' \
+          --set tempo.persistence.size=10Gi \
+          --set tempo.resources.requests.cpu=100m \
+          --set tempo.resources.requests.memory=256Mi \
+          --set "tempo.nodeSelector.capability=monitoring" \
+          --set "tempo.tolerations[0].key=dedicated" \
+          --set "tempo.tolerations[0].operator=Equal" \
+          --set "tempo.tolerations[0].value=monitoring" \
+          --set "tempo.tolerations[0].effect=NoSchedule"
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+
+    - name: Deploy Grafana (Dashboards)
+      shell: |
+        helm upgrade --install grafana grafana/grafana \
+          --namespace '{{ monitoring_namespace }}' \
+          --set adminPassword='{{ grafana_admin_password }}' \
+          --set persistence.enabled=true \
+          --set persistence.storageClass='{{ storage_class_name }}' \
+          --set persistence.size=5Gi \
+          --set service.type=NodePort \
+          --set "datasources.datasources\.yaml.apiVersion=1" \
+          --set "datasources.datasources\.yaml.datasources[0].name=Loki" \
+          --set "datasources.datasources\.yaml.datasources[0].type=loki" \
+          --set "datasources.datasources\.yaml.datasources[0].url=http://loki-gateway.{{ monitoring_namespace }}.svc.cluster.local" \
+          --set "datasources.datasources\.yaml.datasources[0].access=proxy" \
+          --set "datasources.datasources\.yaml.datasources[1].name=Tempo" \
+          --set "datasources.datasources\.yaml.datasources[1].type=tempo" \
+          --set "datasources.datasources\.yaml.datasources[1].url=http://tempo.{{ monitoring_namespace }}.svc.cluster.local:3100" \
+          --set "datasources.datasources\.yaml.datasources[1].access=proxy" \
+          --set "nodeSelector.capability=monitoring" \
+          --set "tolerations[0].key=dedicated" \
+          --set "tolerations[0].operator=Equal" \
+          --set "tolerations[0].value=monitoring" \
+          --set "tolerations[0].effect=NoSchedule"
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      no_log: true
+
+    - name: Deploy OpenTelemetry Collector
+      shell: |
+        helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
+        helm repo update
+        helm upgrade --install otel-collector open-telemetry/opentelemetry-collector \
+          --namespace '{{ monitoring_namespace }}' \
+          --set mode=deployment \
+          --set config.exporters.otlp.endpoint=tempo.{{ monitoring_namespace }}.svc.cluster.local:4317 \
+          --set config.exporters.otlp.tls.insecure=true \
+          --set config.exporters.loki.endpoint=http://loki-gateway.{{ monitoring_namespace }}.svc.cluster.local/loki/api/v1/push \
+          --set config.service.pipelines.traces.receivers=[otlp] \
+          --set config.service.pipelines.traces.processors=[batch] \
+          --set config.service.pipelines.traces.exporters=[otlp] \
+          --set config.service.pipelines.logs.receivers=[otlp] \
+          --set config.service.pipelines.logs.processors=[batch] \
+          --set config.service.pipelines.logs.exporters=[loki] \
+          --set "nodeSelector.capability=monitoring" \
+          --set "tolerations[0].key=dedicated" \
+          --set "tolerations[0].operator=Equal" \
+          --set "tolerations[0].value=monitoring" \
+          --set "tolerations[0].effect=NoSchedule"
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+
+    - name: Get Grafana NodePort
+      shell: "kubectl get svc grafana -n '{{ monitoring_namespace }}' -o jsonpath='{.spec.ports[0].nodePort}'"
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      register: grafana_port
+      changed_when: false
+
+    - name: Display connection info
+      debug:
+        msg:
+          - "LGTM Stack + OpenTelemetry Deployed!"
+          - "Grafana: http://<Any-Node-IP>:{{ grafana_port.stdout }}"
+          - "Loki Gateway: http://loki-gateway.{{ monitoring_namespace }}.svc.cluster.local"
+          - "Tempo OTLP: http://otel-collector.{{ monitoring_namespace }}.svc.cluster.local:4317"
+          - "Username: admin"
+          - "Password: {{ grafana_admin_password if grafana_admin_password != 'admin' else '****** (default)' }}"

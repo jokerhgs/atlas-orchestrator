@@ -13,8 +13,10 @@
       set_fact:
         join_command: "{{ join_command_raw.stdout }}"
 
-- name: Join worker nodes to Kubernetes cluster
-  hosts: role_worker
+- name: Join worker and monitoring nodes to Kubernetes cluster
+  hosts:
+    - role_worker
+    - role_monitoring
   become: yes
   vars:
     join_command: "{{ hostvars[groups['role_control_plane'][0]]['join_command'] }}"
@@ -38,6 +40,21 @@
         var: join_result.stdout_lines
       when: join_result is changed
 
+- name: Configure Dedicated Monitoring Node
+  hosts: role_control_plane
+  become: yes
+  tasks:
+    - name: Label and Taint Monitoring Nodes
+      shell: |
+        kubectl label node {{ hostvars[item]['ansible_hostname'] }} node-role.kubernetes.io/monitoring="" --overwrite
+        kubectl label node {{ hostvars[item]['ansible_hostname'] }} capability=monitoring --overwrite
+        kubectl taint node {{ hostvars[item]['ansible_hostname'] }} dedicated=monitoring:NoSchedule --overwrite
+      loop: "{{ groups['role_monitoring'] }}"
+      environment:
+        KUBECONFIG: /root/.kube/config
+      when: groups['role_monitoring'] is defined
+      changed_when: false
+
 - name: Verify cluster status
   hosts: role_control_plane
   become: yes
@@ -51,7 +68,7 @@
       changed_when: false
 
     - name: Get cluster nodes
-      command: kubectl get nodes -o wide
+      command: kubectl get nodes --show-labels
       register: cluster_nodes
       changed_when: false
 
