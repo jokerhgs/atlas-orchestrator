@@ -5,7 +5,9 @@
     - group_vars/all/vault.yml
   vars:
     monitoring_namespace: monitoring
-    storage_class_name: ebs-gp3
+    loki_s3_bucket: "{{ lookup('env', 'LOKI_S3_BUCKET') }}"
+    tempo_s3_bucket: "{{ lookup('env', 'TEMPO_S3_BUCKET') }}"
+    aws_region: "{{ lookup('env', 'AWS_REGION') | default('us-east-1', true) }}"
     grafana_admin_password: "{{ vault_grafana_admin_password }}"
     kubeconfig_path: "/root/.kube/config"
 
@@ -27,22 +29,6 @@
       environment:
         KUBECONFIG: "{{ kubeconfig_path }}"
 
-    - name: Create AWS EBS StorageClass
-      shell: |
-        cat <<EOF | kubectl apply -f -
-        apiVersion: storage.k8s.io/v1
-        kind: StorageClass
-        metadata:
-          name: '{{ storage_class_name }}'
-        provisioner: ebs.csi.aws.com
-        volumeBindingMode: WaitForFirstConsumer
-        reclaimPolicy: Delete
-        parameters:
-          type: gp3
-          encrypted: "true"
-        EOF
-      environment:
-        KUBECONFIG: "{{ kubeconfig_path }}"
 
     - name: Deploy Loki (Log Aggregation)
       shell: |
@@ -50,24 +36,30 @@
           --namespace '{{ monitoring_namespace }}' \
           --set loki.auth_enabled=false \
           --set deploymentMode=SingleBinary \
-          --set loki.storage.type='filesystem' \
-          --set loki.storage.bucketNames.chunks='chunks' \
-          --set loki.storage.bucketNames.rules='rules' \
-          --set loki.storage.bucketNames.admin='admin' \
-          --set read.replicas=0 \
-          --set write.replicas=0 \
-          --set backend.replicas=0 \
+          --set loki.commonStorage.type='s3' \
+          --set loki.commonStorage.s3.region='{{ aws_region }}' \
+          --set loki.commonStorage.s3.bucketnames='{{ loki_s3_bucket }}' \
+          --set loki.storage.type='s3' \
+          --set loki.storage.bucketNames.chunks='{{ loki_s3_bucket }}' \
+          --set loki.storage.bucketNames.ruler='{{ loki_s3_bucket }}' \
+          --set loki.storage.bucketNames.admin='{{ loki_s3_bucket }}' \
+          --set loki.storage.s3.region='{{ aws_region }}' \
+          --set loki.storage.s3.s3ForcePathStyle=false \
           --set loki.schemaConfig.configs[0].from="2024-01-01" \
           --set loki.schemaConfig.configs[0].store="tsdb" \
-          --set loki.schemaConfig.configs[0].object_store="filesystem" \
+          --set loki.schemaConfig.configs[0].object_store="s3" \
           --set loki.schemaConfig.configs[0].schema="v13" \
           --set loki.schemaConfig.configs[0].index.prefix="loki_index_" \
           --set loki.schemaConfig.configs[0].index.period="24h" \
           --set lokiCanary.enabled=false \
           --set test.enabled=false \
-          --set loki.persistence.enabled=true \
-          --set loki.persistence.storageClass='{{ storage_class_name }}' \
-          --set loki.persistence.size=10Gi \
+          --set loki.persistence.enabled=false \
+          --set loki.singleBinary.persistence.enabled=false \
+          --set loki.resultsCache.enabled=false \
+          --set loki.chunksCache.enabled=false \
+          --set loki.resources.requests.cpu=100m \
+          --set loki.resources.requests.memory=256Mi \
+          --set loki.resources.limits.memory=512Mi \
           --set "loki.nodeSelector.capability=monitoring" \
           --set "loki.tolerations[0].key=dedicated" \
           --set "loki.tolerations[0].operator=Equal" \
@@ -80,12 +72,13 @@
       shell: |
         helm upgrade --install tempo grafana/tempo \
           --namespace '{{ monitoring_namespace }}' \
-          --set tempo.storage.trace.backend=local \
-          --set tempo.persistence.enabled=true \
-          --set tempo.persistence.storageClass='{{ storage_class_name }}' \
-          --set tempo.persistence.size=10Gi \
-          --set tempo.resources.requests.cpu=100m \
-          --set tempo.resources.requests.memory=256Mi \
+          --set tempo.storage.trace.backend=s3 \
+          --set tempo.storage.trace.s3.bucket='{{ tempo_s3_bucket }}' \
+          --set tempo.storage.trace.s3.region='{{ aws_region }}' \
+          --set tempo.persistence.enabled=false \
+          --set tempo.resources.requests.cpu=50m \
+          --set tempo.resources.requests.memory=128Mi \
+          --set tempo.resources.limits.memory=256Mi \
           --set "tempo.nodeSelector.capability=monitoring" \
           --set "tempo.tolerations[0].key=dedicated" \
           --set "tempo.tolerations[0].operator=Equal" \
@@ -99,9 +92,7 @@
         helm upgrade --install grafana grafana/grafana \
           --namespace '{{ monitoring_namespace }}' \
           --set adminPassword='{{ grafana_admin_password }}' \
-          --set persistence.enabled=true \
-          --set persistence.storageClass='{{ storage_class_name }}' \
-          --set persistence.size=5Gi \
+          --set persistence.enabled=false \
           --set service.type=NodePort \
           --set "datasources.datasources\.yaml.apiVersion=1" \
           --set "datasources.datasources\.yaml.datasources[0].name=Loki" \
@@ -127,7 +118,10 @@
         helm repo update
         helm upgrade --install otel-collector open-telemetry/opentelemetry-collector \
           --namespace '{{ monitoring_namespace }}' \
+          --set image.repository=otel/opentelemetry-collector-contrib \
           --set mode=deployment \
+          --set resources.requests.cpu=50m \
+          --set resources.requests.memory=64Mi \
           --set config.exporters.otlp.endpoint=tempo.{{ monitoring_namespace }}.svc.cluster.local:4317 \
           --set config.exporters.otlp.tls.insecure=true \
           --set config.exporters.loki.endpoint=http://loki-gateway.{{ monitoring_namespace }}.svc.cluster.local/loki/api/v1/push \
@@ -142,6 +136,14 @@
           --set "tolerations[0].operator=Equal" \
           --set "tolerations[0].value=monitoring" \
           --set "tolerations[0].effect=NoSchedule"
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+
+    - name: Deploy Promtail (Log Shipper)
+      shell: |
+        helm upgrade --install promtail grafana/promtail \
+          --namespace '{{ monitoring_namespace }}' \
+          --set "config.clients[0].url=http://loki-gateway.{{ monitoring_namespace }}.svc.cluster.local/loki/api/v1/push"
       environment:
         KUBECONFIG: "{{ kubeconfig_path }}"
 

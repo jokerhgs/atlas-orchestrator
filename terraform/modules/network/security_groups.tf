@@ -43,6 +43,14 @@ resource "aws_security_group" "private_sg" {
     cidr_blocks = [var.vpc_cidr]
   }
 
+  # Allow all internal communication between nodes
+  ingress {
+    from_port = 0
+    to_port   = 0
+    protocol  = "-1"
+    self      = true
+  }
+
   # Allow Flannel VXLAN from within the VPC
   ingress {
     from_port   = 8472

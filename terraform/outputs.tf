@@ -20,5 +20,15 @@ output "instance_ids" {
 
 output "ssm_bucket_name" {
   description = "The name of the S3 bucket for SSM session logs"
-  value       = module.s3.bucket_name
+  value       = module.s3.ssm_bucket_name
+}
+
+output "loki_bucket_name" {
+  description = "The name of the S3 bucket for Loki data"
+  value       = module.s3.loki_bucket_name
+}
+
+output "tempo_bucket_name" {
+  description = "The name of the S3 bucket for Tempo data"
+  value       = module.s3.tempo_bucket_name
 }

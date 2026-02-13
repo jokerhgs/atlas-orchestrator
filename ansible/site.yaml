@@ -11,8 +11,5 @@
 # 3. Join Worker & Monitoring nodes to the cluster and apply Isolation Taints
 - import_playbook: init-worker-nodes.yaml
 
-# 4. Deploy the AWS EBS CSI Driver (Storage Layer)
-# - import_playbook: init-ebs-csi.yaml
-
-# 5. Deploy the LGTM Monitoring Stack + OpenTelemetry (Observability Layer)
+# 4. Deploy the LGTM Monitoring Stack + OpenTelemetry (Observability Layer)
 - import_playbook: init-monitoring-stack.yaml

@@ -48,11 +48,13 @@ To ensure Ansible uses the local configuration file (especially important in WSL
 export ANSIBLE_CONFIG="./ansible.cfg"
 ```
 
-### SSM Log Bucket
-Defined in `group_vars/aws_ec2.yml`, this variable determines where Session Manager logs are stored.
+### S3 Storage Buckets
+Required for SSM logging and the Monitoring Stack (Loki/Tempo). Retrieve these from your Terraform outputs.
+
 ```bash
-export SSM_LOG_BUCKET="atlas-ssm-logs-xxxxxx" 
-# (Retrieve this value from your Terraform outputs: 'terraform output ssm_bucket_name')
+export SSM_LOG_BUCKET="atlas-ssm-logs-xxxxxx"
+export LOKI_S3_BUCKET="atlas-loki-data-xxxxxx"
+export TEMPO_S3_BUCKET="atlas-tempo-data-xxxxxx"
 ```
 
 ---
@@ -67,6 +69,8 @@ export AWS_PROFILE=default  # If you use ~/.aws/credentials profiles
 export AWS_REGION=us-east-1
 export ANSIBLE_CONFIG=./ansible.cfg
 export SSM_LOG_BUCKET=$(cd ../terraform && terraform output -raw ssm_bucket_name)
+export LOKI_S3_BUCKET=$(cd ../terraform && terraform output -raw loki_bucket_name)
+export TEMPO_S3_BUCKET=$(cd ../terraform && terraform output -raw tempo_bucket_name)
 
 # Verify setup
 ansible-inventory --graph

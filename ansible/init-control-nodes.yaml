@@ -143,16 +143,3 @@
         name: helm
         state: present
         update_cache: yes
-
-    - name: Add AWS EBS CSI Driver Helm repository
-      shell: helm repo add aws-ebs-csi-driver https://kubernetes-sigs.github.io/aws-ebs-csi-driver && helm repo update
-      environment:
-        KUBECONFIG: /root/.kube/config
-
-    - name: Install AWS EBS CSI Driver
-      shell: |
-        helm upgrade --install aws-ebs-csi-driver \
-          --namespace kube-system \
-          aws-ebs-csi-driver/aws-ebs-csi-driver
-      environment:
-        KUBECONFIG: /root/.kube/config

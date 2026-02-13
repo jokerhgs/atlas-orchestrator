@@ -22,7 +22,7 @@ module "ec2" {
   source               = "./modules/ec2"
   aws_region           = var.aws_region
   instance_name        = count.index == 0 ? "${var.project_name}-control-plane" : (count.index == 3 ? "${var.project_name}-monitoring" : "${var.project_name}-worker-${count.index}")
-  instance_type        = count.index == 3 ? "t4g.medium" : "t4g.small" # Monitoring node gets 4GB RAM
+  instance_type        = "t4g.small" # Use small for all nodes to stay cost-effective while maintaining performance
   subnet_id            = module.network.private_subnet_ids[count.index % length(module.network.private_subnet_ids)]
   security_group_ids   = [module.network.private_security_group_id]
   iam_instance_profile = module.iam.instance_profile_name

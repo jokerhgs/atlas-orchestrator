@@ -8,9 +8,8 @@ The cluster setup is divided into **three sequential playbooks** that must be ex
 
 1. **`init-nodes.yaml`** - Prepares all nodes (control plane + workers)
 2. **`init-control-nodes.yaml`** - Initializes the Kubernetes control plane
-3. **`init-worker-nodes.yaml`** - Joins worker nodes to the cluster
-4. **`init-ebs-csi.yaml`** - Installs the AWS EBS CSI Driver for persistent storage
-5. **`init-monitoring-stack.yaml`** - Deploys Loki and Grafana with automated security
+3. **`init-worker-nodes.yaml`** - Joins worker/monitoring nodes to the cluster
+4. **`init-monitoring-stack.yaml`** - Deploys the LGTM Stack (Loki, Tempo, Grafana) with S3 storage
 
 ---
 
@@ -137,9 +136,9 @@ ansible-playbook init-control-nodes.yaml
 
 ## Playbook 3: `init-worker-nodes.yaml` (Muscle Layer)
 
-**Target:** `role_worker` group (2 nodes)
+**Target:** `role_worker` and `role_monitoring` groups
 
-**Purpose:** Joins worker nodes to the cluster and verifies the final cluster state.
+**Purpose:** Joins worker and monitoring nodes to the cluster, applies isolation taints, and verifies the final cluster state.
 
 ### Playbook Structure (3 Plays)
 
@@ -323,38 +322,12 @@ kubectl cluster-info
 
 ---
 
-## Playbook 4: `init-ebs-csi.yaml` (Storage Layer)
+
+## Playbook 4: `init-monitoring-stack.yaml` (Observability Layer)
 
 **Target:** `role_control_plane`
 
-**Purpose:** Installs the AWS EBS CSI Driver to enable dynamic provisioning of EBS volumes as Persistent Volumes.
-
-### Tasks Performed
-1. **Helm Setup**: Adds the AWS EBS CSI Driver Helm repository.
-2. **Installation**: Deploys the driver to the `kube-system` namespace.
-3. **Verification**: Waits for CSI controller and node pods to reach `Running` state.
-
-### Execution
-```bash
-ansible-playbook init-control-nodes.yaml
-```
-
-### Verification Commands
-```bash
-# Check CSI driver registration
-kubectl get csidriver
-
-# Check driver pods
-kubectl get pods -n kube-system -l app.kubernetes.io/name=aws-ebs-csi-driver
-```
-
----
-
-## Playbook 5: `init-monitoring-stack.yaml` (Observability Layer)
-
-**Target:** `role_control_plane`
-
-**Purpose:** Deploys a full monitoring stack (Loki for logs, Grafana for dashboards) using AWS EBS for persistent data storage.
+**Purpose:** Deploys a full monitoring stack (Loki for logs, Tempo for traces, Grafana for dashboards) using **AWS S3** for durable data storage.
 
 ### Security Highlights
 *   **Ansible Vault**: Sensitive credentials (like the Grafana admin password) are stored in an encrypted `vault.yml` file.
@@ -364,10 +337,11 @@ kubectl get pods -n kube-system -l app.kubernetes.io/name=aws-ebs-csi-driver
 
 ### Tasks Performed
 1. **Namespace Creation**: Creates the `monitoring` namespace.
-2. **Storage Configuration**: Creates a `gp3` StorageClass specifically for monitoring.
-3. **Loki Deployment**: Deploys Loki in `SingleBinary` mode with filesystem storage compatibility.
-4. **Grafana Deployment**: Deploys Grafana with persistence and exposes it via a `NodePort`.
-5. **Auto-Discovery**: Automatically fetches the assigned NodePort and displays connection instructions.
+2. **Loki Deployment**: Deploys Loki in `SingleBinary` mode with **S3 object storage** for chunks and indexes.
+3. **Tempo Deployment**: Deploys Tempo with **S3 backend** for trace storage.
+4. **Grafana Deployment**: Deploys Grafana with persistence disabled (stateless) and exposed via a `NodePort`.
+5. **OpenTelemetry Collector**: Deploys OTel collector to pipe data into the stack.
+6. **Auto-Discovery**: Automatically fetches the assigned NodePort and displays connection instructions.
 
 ### Security Setup (Ansible Vault)
 Before running the playbook, you must set up your vault:

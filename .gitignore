@@ -30,3 +30,7 @@ Thumbs.db
 *.pem
 *.key
 id_rsa*
+
+# Ansible
+ansible/vault_pass.sh
+*inventory.aws_ec2.yml
